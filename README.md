@@ -23,8 +23,8 @@
 		System.out.println(decodeModel);
     
 TestModel 的声明如下：
-        public class TestModel extends TableEx {
 
+        public class TestModel extends TableEx {
             @Index(id = 1)
             public String strField;
 
@@ -44,3 +44,7 @@ TestModel 的声明如下：
                 super(bf);
             }
         }
+	
+有关FlatBuffers 详细信息参考官方文档：http://google.github.io/flatbuffers/
+有任何问题请联系作者：andrewlu1@126.com
+
