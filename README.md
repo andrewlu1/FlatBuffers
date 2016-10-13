@@ -24,7 +24,7 @@
     
 TestModel 的声明如下：
 
-        public class TestModel extends TableEx {
+        public class TestModel extends FBTable {
             @Index(id = 1)
             public String strField;
 
@@ -47,11 +47,20 @@ TestModel 的声明如下：
 	
 使用：
 只需包含src中的代码到自己的工程即可拥有FlatBuffers 的编解码能力，不需要再编写schema 和flatc 编译schema. 
-就像编写普通的JavaBean模型一样编写自己的类，只需继承TableEx类，并按昭示例代码的样式为属性添加 @Index索引注解即可。
+就像编写普通的JavaBean模型一样编写自己的类，只需继承FBTable类，并按昭示例代码的样式为属性添加 @Index索引注解即可。
 这样模型便具有了encode()和decode()两个基础能力。
 
 待新增能力：
-直接解析根数据为模型数组的情形。即ByteBuffer中直接存储模型数组的情况。当前只能解析ByteBuffer中存在单个模型对象的情形。
+//直接解析根数据为模型数组的情形。即ByteBuffer中直接存储模型数组的情况。当前只能解析ByteBuffer中存在单个模型对象的情形。
+
+V2 在FBTable中增加了对列表数据的编码和解析过程。
+使用过程如下：
+
+	List<Integer> models = FBTable.decode(buffer, int.class);
+	ByteBuffer buffer2 = FBTable.encode(models);
+
+以上两个过程应当是可逆的。即有了列表数据ByteBuffer便可以解析出相应的列表对象，同样将列表对象传入encode中又能够恢复出ByteBuffer
+实现过程相应比较简单，可以参考接口实现。
 
 有关FlatBuffers 详细信息参考官方文档：http://google.github.io/flatbuffers/
 有任何问题请联系作者：andrewlu1@126.com
