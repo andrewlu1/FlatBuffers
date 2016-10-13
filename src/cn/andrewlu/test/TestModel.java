@@ -8,24 +8,13 @@ package cn.andrewlu.test;
  * Make sure you have two constructors in all the classes that extends TableEx.  
  */
 import java.nio.ByteBuffer;
-import java.util.List;
 
 import com.google.flatbuffers.Index;
-import com.google.flatbuffers.TableEx;
+import com.google.flatbuffers.FBTable;
 
-public class TestModel extends TableEx {
-
-	@Index(id = 1)
-	public String strField;
-
-	@Index(id = 0, type = String.class)
-	public List<String> arrayField;
-
-	@Index(id = 2)
-	public int[] intArrayField;
-
-	@Index(id = 3)
-	public SubModel objField;
+public class TestModel extends FBTable {
+	@Index(id = 0)
+	int[] data;
 
 	public TestModel() {
 	}
@@ -35,11 +24,15 @@ public class TestModel extends TableEx {
 	}
 }
 
-class SubModel extends TableEx {
+class SubModel extends FBTable {
 	@Index(id = 0)
-	public float data;
+	public float i;
 
 	public SubModel() {
+	}
+
+	public SubModel(float i) {
+		this.i = i;
 	}
 
 	public SubModel(ByteBuffer bf) {

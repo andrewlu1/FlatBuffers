@@ -19,18 +19,25 @@ import java.util.List;
 import java.util.Set;
 import java.util.TreeSet;
 
-public abstract class TableEx extends Table {
+public abstract class FBTable extends Table {
 	protected final static int INVALIDE = -1;
 
-	public TableEx(ByteBuffer _bb) {
+	public FBTable(ByteBuffer _bb) {
 		_bb.order(ByteOrder.LITTLE_ENDIAN);
 		bb_pos = _bb.getInt(_bb.position()) + _bb.position();
 		bb = _bb;
-		init();
+		decode();
 	}
 
-	public TableEx() {
+	public FBTable() {
+	}
 
+	// 只给自己用，用来指定List元素的类型。
+	private FBTable(ByteBuffer _bb, Class dataElementType) {
+		_bb.order(ByteOrder.LITTLE_ENDIAN);
+		bb_pos = _bb.getInt(_bb.position()) + _bb.position();
+		bb = _bb;
+		decode(dataElementType);
 	}
 
 	// 这可能涉及到递归调用。因此需要注意调用顺序问题。
@@ -80,13 +87,12 @@ public abstract class TableEx extends Table {
 			case Array:
 			case List:
 			case CharSequence:
-			case TableEx:
+			case FBTable:
 			case ByteVector:
 				builder.addOffset(index.id(), ((Integer) value).intValue(), 0);
 				break;
 			}
 		}
-
 		return builder.endObject();
 	}
 
@@ -99,8 +105,35 @@ public abstract class TableEx extends Table {
 		return builder.dataBuffer();
 	}
 
+	// 处理数组类型
+	private final static List LIST_EMPTY = new ArrayList(0);
+
+	public static <T> List<T> decode(ByteBuffer listDataBuffer, Class<T> c) {
+		LIST_EMPTY.clear();// 防止外界对其进行修改后影响其他对象解析。
+		if (listDataBuffer == null) {
+			return LIST_EMPTY;
+		}
+		assertDie(checkTypeValid(c),
+				"Encode Type cannot be null or outside class of TableEx!");
+		List<T> data = new TableArrayParser<T>(listDataBuffer, c).getData();
+		if (data == null)
+			return LIST_EMPTY;
+		return data;
+	}
+
+	// 将列表数据编码。
+	public static ByteBuffer encode(List objList) {
+		TableArrayParser parser = new TableArrayParser(objList);
+		return parser.encode();
+	}
+
+	public FBTable decode() {
+		decode(null);
+		return this;
+	}
+
 	// 通过遍历头上的ID索引而确定其值。
-	private void init() {
+	private void decode(Class listElementType) {
 		try {
 			Class c = this.getClass();
 			Field[] fields = c.getDeclaredFields();
@@ -115,18 +148,31 @@ public abstract class TableEx extends Table {
 				Class type = f.getType();
 
 				int id = index.id();
-				Class actualType = index.type();
+				Class actualType = null;
 
 				// 数组类型。
 				if (type.isArray()) {
 					actualType = type.getComponentType();
 				} else if (Collection.class.isAssignableFrom(type)) {
+					// 当传入的元素类型不为空时，以此为准备，否则读取注解中的类型。这里是为了解决数组类型的对象解析做铺垫。
+					if (listElementType != null) {
+						actualType = listElementType;
+					} else {
+						actualType = index.type();
+						String clzName = index.typeStr();
+						if (Object.class == actualType) {
+							if (!"".equals(clzName)) {
+								actualType = Class.forName(clzName);
+							}
+						}
+					}
 				} else if (checkTypeValid(type)) {
 					// 读取普通对象。
 					decodePrimitiveField(f, id);
 					continue;
 				} else
 					continue;
+
 				assertDie(
 						checkTypeValid(actualType),
 						String.format(
@@ -148,9 +194,9 @@ public abstract class TableEx extends Table {
 	 * @param t
 	 * @return
 	 */
-	private boolean checkTypeValid(Class t) {
+	private static boolean checkTypeValid(Class t) {
 		return t != null
-				&& (TableEx.class.isAssignableFrom(t) || isPrimitiveType(t) || CharSequence.class
+				&& (FBTable.class.isAssignableFrom(t) || isPrimitiveType(t) || CharSequence.class
 						.isAssignableFrom(t));
 	}
 
@@ -160,7 +206,7 @@ public abstract class TableEx extends Table {
 	 * @param t
 	 * @return
 	 */
-	private boolean isPrimitiveType(Class t) {
+	private static boolean isPrimitiveType(Class t) {
 		return primitiveClassIndexOf(t) >= 0;
 	}
 
@@ -223,17 +269,17 @@ public abstract class TableEx extends Table {
 					f.set(this, o != 0 ? bb.getDouble(o + bb_pos) : 0);
 					break;
 				}
-			} else if (TableEx.class.isAssignableFrom(c)) {
+			} else if (FBTable.class.isAssignableFrom(c)) {
 				if (o == 0)
 					return;
 				// 嵌套对象操作
 				Constructor constructor = c.getConstructor((Class[]) null);
 				constructor.setAccessible(true);
-				TableEx obj = (TableEx) constructor
+				FBTable obj = (FBTable) constructor
 						.newInstance((Object[]) null);
 				obj.bb_pos = __indirect(o + bb_pos);
 				obj.bb = bb;
-				obj.init();
+				obj.decode();
 				f.set(this, obj);
 			} else if (CharSequence.class.isAssignableFrom(c)) {
 				// 字符串操作
@@ -357,16 +403,16 @@ public abstract class TableEx extends Table {
 					}
 					break;
 				}
-				case TableEx: {
+				case FBTable: {
 					// 嵌套对象操作
 					Constructor constructor = elemType
 							.getConstructor((Class[]) null);
 					constructor.setAccessible(true);
-					TableEx obj = (TableEx) constructor
+					FBTable obj = (FBTable) constructor
 							.newInstance((Object[]) null);
 					obj.bb_pos = __indirect(o);
 					obj.bb = bb;
-					obj.init();
+					obj.decode();
 					ele = obj;
 					break;
 				}
@@ -389,7 +435,7 @@ public abstract class TableEx extends Table {
 	}
 
 	private enum ClassType {
-		Primitive, TableEx, CharSequence, Array, ByteVector, List, Unknown
+		Primitive, FBTable, CharSequence, Array, ByteVector, List, Unknown
 	}
 
 	// 区分类型。
@@ -397,8 +443,8 @@ public abstract class TableEx extends Table {
 		ClassType type = ClassType.Unknown;
 		if (isPrimitiveType(elemType)) {
 			type = ClassType.Primitive;
-		} else if (TableEx.class.isAssignableFrom(elemType)) {
-			type = ClassType.TableEx;
+		} else if (FBTable.class.isAssignableFrom(elemType)) {
+			type = ClassType.FBTable;
 		} else if (CharSequence.class.isAssignableFrom(elemType)) {
 			type = ClassType.CharSequence;
 		} else if (elemType.isArray()) {
@@ -496,9 +542,9 @@ public abstract class TableEx extends Table {
 				return o;
 			case CharSequence:
 				return builder.createString((CharSequence) o);
-			case TableEx:
+			case FBTable:
 				// 如果属性值为空，则不进行序列化
-				return ((TableEx) o).encode(builder);
+				return ((FBTable) o).encode(builder);
 			case ByteVector:
 				if (Byte[].class == field.getType()) {
 					return builder.createByteVector(toPrimitive((Byte[]) o));
@@ -517,6 +563,27 @@ public abstract class TableEx extends Table {
 				if (size <= 0)
 					return null;
 				Class c = index.type();
+				String clzName = index.typeStr();
+				if (Object.class == c) {
+					if ("".equals(clzName)) {
+						// 如果什么类型都没设置，则检测元素对象的类型。
+						Iterator iterator = ((Collection) o).iterator();
+						do {
+							if (iterator.hasNext()) {
+								Object eleObject = iterator.next();
+								if (eleObject != null) {
+									c = eleObject.getClass();
+									break;
+								}
+							}
+							assertDie(false,
+									"you must set type of element on the List field.");
+						} while (false);
+
+					} else {
+						c = Class.forName(clzName);
+					}
+				}
 				return encodeArrayData(builder, o, size, c);
 			}
 			}
@@ -542,13 +609,13 @@ public abstract class TableEx extends Table {
 				}
 			});
 			return builder.endVector();
-		} else if (ClassType.TableEx == type || ClassType.CharSequence == type) {
+		} else if (ClassType.FBTable == type || ClassType.CharSequence == type) {
 			// 用来保存列表元素的索引。正序保存，但反序添加。
 			final int[] offsets = new int[size];
 			forEach(arrayOrList, false, new ElementListener() {
 				public void accept(Object ele, int index) {
-					if (ClassType.TableEx == type) {
-						offsets[index] = ((TableEx) ele).encode(builder);
+					if (ClassType.FBTable == type) {
+						offsets[index] = ((FBTable) ele).encode(builder);
 					} else {
 						offsets[index] = builder
 								.createString((CharSequence) ele);
@@ -704,9 +771,26 @@ public abstract class TableEx extends Table {
 	}
 
 	// 不满足条件就报错。
-	private void assertDie(boolean exp, String msg) {
+	private static void assertDie(boolean exp, String msg) {
 		if (!exp) {
 			throw new RuntimeException(msg);
 		}
 	};
+
+	private final static class TableArrayParser<T> extends FBTable {
+		@Index(id = 0)
+		public List<T> data;
+
+		public TableArrayParser(List<T> data) {
+			this.data = data;
+		}
+
+		public TableArrayParser(ByteBuffer bf, Class<T> dClass) {
+			super(bf, dClass);
+		}
+
+		public final List<T> getData() {
+			return data;
+		}
+	}
 }
